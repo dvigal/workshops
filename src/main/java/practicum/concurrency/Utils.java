@@ -6,12 +6,13 @@ public class Utils {
 
     public static void printThread(Thread thread) {
         System.out.println(
-                String.format("Thread[id=%s, name=%s, state=%s, alive=%s, daemon=%s]",
+                String.format("Thread[id=%s, name=%s, state=%s, alive=%s, daemon=%s, interrupted=%s]",
                         thread.getId(),
                         thread.getName(),
                         thread.getState(),
                         thread.isAlive(),
-                        thread.isDaemon()
+                        thread.isDaemon(),
+                        thread.isInterrupted()
                 )
         );
     }

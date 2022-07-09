@@ -15,7 +15,7 @@ public class CyclicBarrierDemo {
 
     private static void doWork() {
         for (int a = 0; a < 10000; a++) {
-            for (int b = 0; b < 50000; b++) {
+            for (int b = 0; b < 10000; b++) {
                 holder.set(a * b);
             }
         }
@@ -27,7 +27,7 @@ public class CyclicBarrierDemo {
         var totalWorkers = 10;
         var latch = new CountDownLatch(totalWorkers);
         var workers = new HashSet<Thread>();
-        var cyclicBarrier = new CyclicBarrier(10, () -> System.out.println(String.format("%s %s - all workers started work cycle", Thread.currentThread().getName(), LocalTime.now())));
+        var cyclicBarrier = new CyclicBarrier(5, () -> System.out.println(String.format("%s %s - all workers started work cycle", Thread.currentThread().getName(), LocalTime.now())));
 
         var printer = new Thread(() -> {
             try {
@@ -39,7 +39,7 @@ public class CyclicBarrierDemo {
                 var waitedCount = workers.stream().filter(worker -> worker.getState() == Thread.State.WAITING).count();
                 var activeCount = workers.stream().filter(worker -> worker.getState() == Thread.State.RUNNABLE).count();
                 System.out.println(String.format("%s - %s, %s - %s", Thread.State.WAITING, waitedCount, Thread.State.RUNNABLE, activeCount));
-                sleep(Duration.ofSeconds(5));
+                sleep(Duration.ofSeconds(2));
             }
         }, "Worker");
         printer.setDaemon(true);

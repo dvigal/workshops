@@ -34,11 +34,13 @@ public class SemaphoreDemo {
             }
             while (!Thread.currentThread().isInterrupted()) {
                if (!workers.isEmpty()) {
-                   var waitedCount = workers.stream().filter(worker -> worker.getState() == Thread.State.WAITING).count();
+                   var waitedCount = workers.stream()
+                           .filter(worker -> worker.getState() == Thread.State.WAITING)
+                           .count();
                    var activeCount = workers.stream().filter(worker -> worker.getState() == Thread.State.RUNNABLE).count();
                    System.out.println(String.format("%s - %s, %s - %s", Thread.State.WAITING, waitedCount, Thread.State.RUNNABLE, activeCount));
                }
-               sleep(Duration.ofSeconds(1));
+               sleep(Duration.ofMillis(500));
            }
         }, "Worker");
         printer.setDaemon(true);

@@ -1,5 +1,6 @@
 package practicum.concurrency.synchronizator;
 
+
 import java.time.Duration;
 import java.util.concurrent.Exchanger;
 import java.util.concurrent.atomic.AtomicLong;

@@ -14,7 +14,7 @@ public class BlockedThreadDemo {
 
         var printer = new Thread(() -> {
             for (;;) {
-                System.out.println(String.format("%s: Thread %s is busy", Thread.currentThread(), mainThread));
+                System.out.println(String.format("%s: Thread %s is blocked", Thread.currentThread(), mainThread));
                 sleep(Duration.ofMillis(1000));
             }
         });

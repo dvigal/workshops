@@ -24,7 +24,7 @@ public class WaitingThreadDemo {
         printThread(thread);
 
         synchronized (monitor) {
-            monitor.notify();
+            monitor.notifyAll();
         }
     }
 

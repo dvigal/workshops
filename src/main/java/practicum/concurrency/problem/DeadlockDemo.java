@@ -10,6 +10,7 @@ public class DeadlockDemo {
     public static void main(String ...args) throws InterruptedException {
         var latch1 = new CountDownLatch(1);
         var latch2 = new CountDownLatch(1);
+
         var resource1 = new Object();
         var resource2 = new Object();
 

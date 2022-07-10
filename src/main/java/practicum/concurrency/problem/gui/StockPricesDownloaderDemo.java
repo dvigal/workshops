@@ -1,19 +1,27 @@
 package practicum.concurrency.problem.gui;
 
-import lombok.RequiredArgsConstructor;
-import practicum.concurrency.problem.gui.market.MoexQuoteDownloader;
-import practicum.concurrency.problem.gui.market.QuoteDto;
-
-import javax.swing.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.List;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
+import javax.swing.JTextField;
+import javax.swing.ScrollPaneConstants;
+import lombok.RequiredArgsConstructor;
+import practicum.concurrency.problem.gui.market.MoexQuoteDownloader;
+import practicum.concurrency.problem.gui.market.QuoteDto;
 
 public class StockPricesDownloaderDemo {
     private static final String BUTTON_TEXT_STOP = "Stop";
@@ -26,12 +34,9 @@ public class StockPricesDownloaderDemo {
 
     private static ButtonState buttonState = ButtonState.STOPPED;
     private static final MoexQuoteDownloader quoteDownloader = new MoexQuoteDownloader();
-    private static final List<Thread> workers = new ArrayList<>();
-    private static final List<QuoteDto> quotes = new CopyOnWriteArrayList<>();
-    private static Thread textAreaAppenderThread;
-    private static final Object monitor = new Object();
     private static final Executor executor = Executors.newFixedThreadPool(4);
-    private static final AtomicInteger counter = new AtomicInteger(0);
+    private static final ConcurrentLinkedQueue<QuoteDto> queue = new ConcurrentLinkedQueue<>();
+    private static final AtomicBoolean isRunning = new AtomicBoolean();
 
     public static void main(String... args) {
         var frame = new JFrame("Stock price loader");
@@ -65,46 +70,72 @@ public class StockPricesDownloaderDemo {
                 if (buttonState == ButtonState.STOPPED) {
                     button.setText(BUTTON_TEXT_STOP);
                     buttonState = ButtonState.STARTED;
-                    startDownloaderWorkers(textField.getText(), quotes);
+                    startDownloaderWorkers(textField.getText());
+                    isRunning.set(true);
                 } else {
                     button.setText(BUTTON_TEXT_START);
                     buttonState = ButtonState.STOPPED;
-                    textArea.setText("");
-                    quotes.clear();
+                    isRunning.set(false);
                 }
             }
         });
 
-        textAreaAppenderThread = new Thread(() -> {
-            while (true) {
-//                while (!Thread.currentThread().isInterrupted()) {
-//                    if (counter.get() == 0) {
-//                        break;
-//                    }
-//                }
-
-                synchronized (quotes) {
-                    textArea.setText("");
-                    var collection = quotes.stream().sorted(Comparator.comparing(QuoteDto::getDate)).collect(Collectors.toList());
-//                    quotes.sort(Comparator.comparing(QuoteDto::getDate));?
-                    collection.forEach(quote -> {
-                        textArea.append(quote.getDate() + ": " + quote.getClose() + "\n");
-                    });
-                    quotes.clear();
-                }
-            }
-        });
-        textAreaAppenderThread.start();
+        new TextAreaAppender(textArea).start();
 
         frame.setVisible(true);
     }
 
-    private static void startDownloaderWorkers(String symbol, List<QuoteDto> result) {
+    private static class TextAreaAppender extends Thread {
+        private final Set<QuoteDto> quotes = new TreeSet<>(Comparator.comparing(QuoteDto::getDate));
+        private final JTextArea textArea;
+
+        private TextAreaAppender(JTextArea textArea) {
+            super("TextAreaAppender");
+            setDaemon(true);
+            this.textArea = textArea;
+        }
+
+        @Override
+        public void run() {
+            for (;;) {
+                final int sizeBefore = quotes.size();
+                if (isRunning.get()) {
+                    poolQueue();
+                } else {
+                    quotes.clear();
+                }
+                print(sizeBefore);
+                sleep();
+            }
+        }
+
+        private void sleep() {
+            try {
+                TimeUnit.MILLISECONDS.sleep(500);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        private void poolQueue() {
+            while (queue.peek() != null) {
+                quotes.add(queue.poll());
+            }
+        }
+
+        private void print(int sizeBefore) {
+            if (sizeBefore != quotes.size()) {
+                textArea.setText("");
+                quotes.forEach(quote -> textArea.append(quote.getDate() + ": " + quote.getClose() + "\n"));
+            }
+        }
+    }
+
+    private static void startDownloaderWorkers(String symbol) {
         var endDate = LocalDate.now();
         var startDate = endDate.minusMonths(1);
         for (var start = startDate; !start.isAfter(endDate); start = start.plusDays(1)) {
-            counter.incrementAndGet();
-            var worker = new Worker(symbol, result, start, start);
+            var worker = new Worker(symbol, start, start);
             executor.execute(worker);
         }
     }
@@ -112,7 +143,6 @@ public class StockPricesDownloaderDemo {
     @RequiredArgsConstructor
     private static class Worker implements Runnable {
         private final String symbol;
-        private final List<QuoteDto> result;
         private final LocalDate startDate;
         private final LocalDate endDate;
 
@@ -120,11 +150,7 @@ public class StockPricesDownloaderDemo {
         public void run() {
             var quotes = quoteDownloader.download(symbol, startDate, endDate);
             System.out.println(quotes);
-            synchronized (result) {
-                result.addAll(quotes);
-                result.notifyAll();
-            }
-            counter.decrementAndGet();
+            quotes.forEach(queue::offer);
         }
     }
 

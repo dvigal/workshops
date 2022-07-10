@@ -31,7 +31,7 @@ public class StockPricesDownloaderDemo {
     private static Thread textAreaAppenderThread;
     private static final Object monitor = new Object();
     private static final Executor executor = Executors.newFixedThreadPool(4);
-    private static final AtomicInteger counter = new AtomicInteger(0);
+    private static CountDownLatch countDownLatch = new CountDownLatch(30);
 
     public static void main(String... args) {
         var frame = new JFrame("Stock price loader");
@@ -77,21 +77,21 @@ public class StockPricesDownloaderDemo {
 
         textAreaAppenderThread = new Thread(() -> {
             while (true) {
+                if (countDownLatch.getCount() == 0 && textArea.getText().equals("")) {
+                    synchronized (quotes) {
+                        textArea.setText("");
+                        var collection = quotes.stream().sorted(Comparator.comparing(QuoteDto::getDate)).collect(Collectors.toList());
+//                    quotes.sort(Comparator.comparing(QuoteDto::getDate));?
+                        collection.forEach(quote -> {
+                            textArea.append(quote.getDate() + ": " + quote.getClose() + "\n");
+                        });
+                    }
+                }
 //                while (!Thread.currentThread().isInterrupted()) {
 //                    if (counter.get() == 0) {
 //                        break;
 //                    }
 //                }
-
-                synchronized (quotes) {
-                    textArea.setText("");
-                    var collection = quotes.stream().sorted(Comparator.comparing(QuoteDto::getDate)).collect(Collectors.toList());
-//                    quotes.sort(Comparator.comparing(QuoteDto::getDate));?
-                    collection.forEach(quote -> {
-                        textArea.append(quote.getDate() + ": " + quote.getClose() + "\n");
-                    });
-                    quotes.clear();
-                }
             }
         });
         textAreaAppenderThread.start();
@@ -102,8 +102,9 @@ public class StockPricesDownloaderDemo {
     private static void startDownloaderWorkers(String symbol, List<QuoteDto> result) {
         var endDate = LocalDate.now();
         var startDate = endDate.minusMonths(1);
+        int period = (int)(endDate.toEpochDay() - startDate.toEpochDay()) + 1;
+        countDownLatch = new CountDownLatch(period);
         for (var start = startDate; !start.isAfter(endDate); start = start.plusDays(1)) {
-            counter.incrementAndGet();
             var worker = new Worker(symbol, result, start, start);
             executor.execute(worker);
         }
@@ -123,8 +124,8 @@ public class StockPricesDownloaderDemo {
             synchronized (result) {
                 result.addAll(quotes);
                 result.notifyAll();
+                countDownLatch.countDown();
             }
-            counter.decrementAndGet();
         }
     }
 

@@ -11,25 +11,36 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.Phaser;
+import java.util.stream.Collectors;
 
 public class StockPricesDownloaderDemo {
     private static final String BUTTON_TEXT_STOP = "Stop";
     private static final String BUTTON_TEXT_START = "Start";
+
     enum ButtonState {
         STOPPED,
         STARTED
     }
+
     private static ButtonState buttonState = ButtonState.STOPPED;
     private static final MoexQuoteDownloader quoteDownloader = new MoexQuoteDownloader();
-    private static final List<Thread> workers = new ArrayList<>();
-    private static final List<QuoteDto> quotes = new ArrayList<>();
+    private static final List<QuoteDto> quotes = new CopyOnWriteArrayList<>();
     private static Thread textAreaAppenderThread;
-    private static final Object monitor = new Object();
 
-    public static void main(String ...args) {
+    private static final Phaser phaser = new Phaser(1);
+    private static final ConcurrentLinkedQueue<QuoteDto> queue = new ConcurrentLinkedQueue<>();
+    private static final Executor executor = Executors.newFixedThreadPool(4);
+
+    public static void main(String... args) {
         var frame = new JFrame("Stock price loader");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(500,400);
+        frame.setSize(500, 400);
         frame.setResizable(false);
 
         var panel = new JPanel();
@@ -44,7 +55,7 @@ public class StockPricesDownloaderDemo {
         var inputLabel = new JLabel("Enter stock symbol");
         panel.add(inputLabel);
 
-        var textArea = new JTextArea(10,35);
+        var textArea = new JTextArea(10, 35);
         textArea.setEditable(false);
         panel.add(textArea);
 
@@ -70,39 +81,28 @@ public class StockPricesDownloaderDemo {
 
         textAreaAppenderThread = new Thread(() -> {
             while (true) {
-                synchronized (quotes) {
-                    try {
-                        quotes.wait();
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
+                phaser.awaitAdvance(phaser.getPhase());
+                while (!queue.isEmpty()) {
+                    quotes.add(queue.poll());
                 }
                 quotes.sort(Comparator.comparing(QuoteDto::getDate));
-                var it = quotes.iterator();
-
-                while (it.hasNext()) {
-                    var quote = it.next();
-                    it.remove();
-                    textArea.append(quote.getDate() + ": " + quote.getClose() + "\n");
-                }
+                quotes.forEach(quoteDto -> textArea.append(quoteDto.getDate() + ": " + quoteDto.getClose() + "\n"));
             }
         });
+
         textAreaAppenderThread.start();
 
         frame.setVisible(true);
     }
 
     private static void startDownloaderWorkers(String symbol, List<QuoteDto> result) {
-        if (!workers.isEmpty()) {
-            return;
-        }
         var endDate = LocalDate.now();
         var startDate = endDate.minusMonths(1);
         for (var start = startDate; !start.isAfter(endDate); start = start.plusDays(1)) {
-            var thread = new Thread(new Worker(symbol, result, start, start));
-            workers.add(thread);
-            thread.start();
+            phaser.register();
+            executor.execute(new Worker(symbol, result, start, start));
         }
+        phaser.arrive();
     }
 
     @RequiredArgsConstructor
@@ -114,21 +114,10 @@ public class StockPricesDownloaderDemo {
 
         @Override
         public void run() {
-            while (true) {
-                var quotes = quoteDownloader.download(symbol, startDate, endDate);
-                System.out.println(quotes);
-                result.addAll(quotes);
-                synchronized (result) {
-                    result.notifyAll();
-                }
-                synchronized (monitor) {
-                    try {
-                        monitor.wait();
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
-                }
-            }
+            var quotes = quoteDownloader.download(symbol, startDate, endDate);
+            System.out.println(quotes);
+            quotes.forEach(queue::offer);
+            phaser.arriveAndDeregister();
         }
     }
 

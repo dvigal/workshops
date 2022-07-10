@@ -12,6 +12,7 @@ import java.time.LocalDate;
 public class QuoteDto {
     private Long tickerId;
     @JsonFormat
+    private String ticker;
     private LocalDate date;
     private BigDecimal open;
     private BigDecimal high;

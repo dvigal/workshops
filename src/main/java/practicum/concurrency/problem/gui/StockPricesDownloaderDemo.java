@@ -11,6 +11,10 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 public class StockPricesDownloaderDemo {
     private static final String BUTTON_TEXT_STOP = "Stop";
@@ -22,9 +26,11 @@ public class StockPricesDownloaderDemo {
     private static ButtonState buttonState = ButtonState.STOPPED;
     private static final MoexQuoteDownloader quoteDownloader = new MoexQuoteDownloader();
     private static final List<Thread> workers = new ArrayList<>();
-    private static final List<QuoteDto> quotes = new ArrayList<>();
+    private static final List<QuoteDto> quotes = new CopyOnWriteArrayList<>();
     private static Thread textAreaAppenderThread;
     private static final Object monitor = new Object();
+    // нативные средства создания потоков
+    private static final Executor executor = Executors.newFixedThreadPool(4);
 
     public static void main(String ...args) {
         var frame = new JFrame("Stock price loader");
@@ -76,14 +82,11 @@ public class StockPricesDownloaderDemo {
                     } catch (InterruptedException e) {
                         throw new RuntimeException(e);
                     }
-                }
-                quotes.sort(Comparator.comparing(QuoteDto::getDate));
-                var it = quotes.iterator();
-
-                while (it.hasNext()) {
-                    var quote = it.next();
-                    it.remove();
-                    textArea.append(quote.getDate() + ": " + quote.getClose() + "\n");
+                    var collection = quotes.stream().sorted(Comparator.comparing(QuoteDto::getDate)).collect(Collectors.toList());
+                    collection.forEach(quote -> {
+                        textArea.append(quote.getDate() + "  " + quote.getClose() + "\n");
+                    });
+                    quotes.clear();
                 }
             }
         });
@@ -93,16 +96,14 @@ public class StockPricesDownloaderDemo {
     }
 
     private static void startDownloaderWorkers(String symbol, List<QuoteDto> result) {
-        if (!workers.isEmpty()) {
-            return;
-        }
         var endDate = LocalDate.now();
         var startDate = endDate.minusMonths(1);
+
         for (var start = startDate; !start.isAfter(endDate); start = start.plusDays(1)) {
-            var thread = new Thread(new Worker(symbol, result, start, start));
-            workers.add(thread);
-            thread.start();
+            var worker = new Worker(symbol, result, start, start);
+            executor.execute(worker); // MOEX или ALFT в gui
         }
+
     }
 
     @RequiredArgsConstructor
@@ -114,20 +115,14 @@ public class StockPricesDownloaderDemo {
 
         @Override
         public void run() {
-            while (true) {
-                var quotes = quoteDownloader.download(symbol, startDate, endDate);
-                System.out.println(quotes);
-                result.addAll(quotes);
-                synchronized (result) {
-                    result.notifyAll();
-                }
-                synchronized (monitor) {
-                    try {
-                        monitor.wait();
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
-                }
+            var quotes = quoteDownloader.download(symbol, startDate, endDate);
+            System.out.println(quotes);
+            result.addAll(quotes);
+            synchronized (result) {
+                result.notifyAll();
+            }
+            synchronized (monitor) {
+
             }
         }
     }

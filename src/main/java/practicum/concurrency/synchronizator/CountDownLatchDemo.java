@@ -10,8 +10,8 @@ public class CountDownLatchDemo {
 
     private static void doWork() {
         printThread(Thread.currentThread());
-        for (int a = 0; a < 10_000; a++) {
-            for (int b = 0; b < 10_000; b++) {
+        for (int a = 0; a < 5_000; a++) {
+            for (int b = 0; b < 5_000; b++) {
                 holder.set(a * b);
             }
         }
@@ -23,7 +23,9 @@ public class CountDownLatchDemo {
 
         var printer = new Thread(() -> {
             try {
+                System.out.println("waiting");
                 latch.await();
+                System.out.println("get to job");
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -41,7 +43,7 @@ public class CountDownLatchDemo {
         }
 
         latch.await();
-
+        System.out.println(latch.getCount());
         System.out.println("All workers completed jobs");
         // pay salary :)
     }

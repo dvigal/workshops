@@ -111,7 +111,7 @@ public class StockPricesDownloaderDemo {
         for (var start = startDate; !start.isAfter(endDate); start = start.plusDays(1)) {
             synchronized (cacheCollection) {
                 LocalDate finalStart = start;
-                if ( result.stream()
+                if ( cacheCollection.stream()
                         .filter(quote -> quote.getTicker().equalsIgnoreCase(symbol))
                         .anyMatch(quote -> quote.getDate().isEqual(finalStart)) )
                     continue;

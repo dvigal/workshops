@@ -30,8 +30,8 @@ public class StockPricesDownloaderDemo {
     private static final List<QuoteDto> quotes = new CopyOnWriteArrayList<>();
     private static Thread textAreaAppenderThread;
     private static final Object monitor = new Object();
-    private static final Executor executor = Executors.newFixedThreadPool(4);
-    private static final AtomicInteger counter = new AtomicInteger(0);
+    private static final AtomicInteger counterWorkers = new AtomicInteger(0);
+    private static final List<QuoteDto> cacheCollection = new CopyOnWriteArrayList<>();
 
     public static void main(String... args) {
         var frame = new JFrame("Stock price loader");
@@ -64,12 +64,16 @@ public class StockPricesDownloaderDemo {
             public void actionPerformed(ActionEvent e) {
                 if (buttonState == ButtonState.STOPPED) {
                     button.setText(BUTTON_TEXT_STOP);
+                    textField.setEnabled(false);
                     buttonState = ButtonState.STARTED;
                     startDownloaderWorkers(textField.getText(), quotes);
                 } else {
                     button.setText(BUTTON_TEXT_START);
+                    textField.setEnabled(true);
                     buttonState = ButtonState.STOPPED;
                     textArea.setText("");
+                    workers.forEach(thread -> thread.interrupt());
+                    workers.clear();
                     quotes.clear();
                 }
             }
@@ -77,20 +81,22 @@ public class StockPricesDownloaderDemo {
 
         textAreaAppenderThread = new Thread(() -> {
             while (true) {
-//                while (!Thread.currentThread().isInterrupted()) {
-//                    if (counter.get() == 0) {
-//                        break;
-//                    }
-//                }
-
-                synchronized (quotes) {
-                    textArea.setText("");
-                    var collection = quotes.stream().sorted(Comparator.comparing(QuoteDto::getDate)).collect(Collectors.toList());
-//                    quotes.sort(Comparator.comparing(QuoteDto::getDate));?
-                    collection.forEach(quote -> {
-                        textArea.append(quote.getDate() + ": " + quote.getClose() + "\n");
-                    });
-                    quotes.clear();
+                if (counterWorkers.get() != 0) {
+                    synchronized (quotes) {
+                        if (quotes.isEmpty() && !textArea.getText().equalsIgnoreCase(""))
+                            continue;
+                        synchronized (cacheCollection) {
+                            cacheCollection.addAll(quotes.stream().collect(Collectors.toList()));
+                            textArea.setText("");
+                            cacheCollection.stream()
+                                    .filter(quote -> quote.getTicker().equalsIgnoreCase(textField.getText()))
+                                    .sorted(Comparator.comparing(QuoteDto::getDate))
+                                    .forEach(quote -> {
+                                        textArea.append(quote.getDate() + ": " + quote.getClose() + "\n");
+                                    });
+                            quotes.clear();
+                        }
+                    }
                 }
             }
         });
@@ -103,9 +109,17 @@ public class StockPricesDownloaderDemo {
         var endDate = LocalDate.now();
         var startDate = endDate.minusMonths(1);
         for (var start = startDate; !start.isAfter(endDate); start = start.plusDays(1)) {
-            counter.incrementAndGet();
-            var worker = new Worker(symbol, result, start, start);
-            executor.execute(worker);
+            synchronized (cacheCollection) {
+                LocalDate finalStart = start;
+                if ( cacheCollection.stream()
+                        .filter(quote -> quote.getTicker().equalsIgnoreCase(symbol))
+                        .anyMatch(quote -> quote.getDate().isEqual(finalStart)) )
+                    continue;
+                var thread = new Thread(new Worker(symbol, result, start, start));
+                workers.add(thread);
+                counterWorkers.incrementAndGet();
+                thread.start();
+            }
         }
     }
 
@@ -122,9 +136,8 @@ public class StockPricesDownloaderDemo {
             System.out.println(quotes);
             synchronized (result) {
                 result.addAll(quotes);
-                result.notifyAll();
+                counterWorkers.decrementAndGet();
             }
-            counter.decrementAndGet();
         }
     }
 

@@ -124,6 +124,9 @@ public class MoexQuoteDownloader {
             if ("TRADEDATE".equalsIgnoreCase(column)) {
                 quote.setDate(LocalDate.parse(value.toString()));
             }
+            if ("SECID".equalsIgnoreCase(column)) {
+                quote.setTicker(value.toString());
+            }
         }
 
         return Optional.of(quote);

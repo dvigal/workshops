@@ -8,12 +8,9 @@ import javax.swing.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
+import java.util.*;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 public class StockPricesDownloaderDemo {
     private static final String BUTTON_TEXT_STOP = "Stop";
@@ -26,12 +23,8 @@ public class StockPricesDownloaderDemo {
 
     private static ButtonState buttonState = ButtonState.STOPPED;
     private static final MoexQuoteDownloader quoteDownloader = new MoexQuoteDownloader();
-    private static final List<Thread> workers = new ArrayList<>();
-    private static final List<QuoteDto> quotes = new CopyOnWriteArrayList<>();
-    private static Thread textAreaAppenderThread;
-    private static final Object monitor = new Object();
+    private static final SortedSet<QuoteDto> quotes = new TreeSet<>(Comparator.comparing(QuoteDto::getDate));
     private static final Executor executor = Executors.newFixedThreadPool(4);
-    private static final AtomicInteger counter = new AtomicInteger(0);
 
     public static void main(String... args) {
         var frame = new JFrame("Stock price loader");
@@ -51,10 +44,8 @@ public class StockPricesDownloaderDemo {
         var inputLabel = new JLabel("Enter stock symbol");
         panel.add(inputLabel);
 
-        var textArea = new JTextArea(10, 35);
+        var textArea = new JTextArea(22, 35);
         textArea.setEditable(false);
-        panel.add(textArea);
-
         var scroll = new JScrollPane(textArea);
         panel.add(scroll);
         scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS);
@@ -75,22 +66,16 @@ public class StockPricesDownloaderDemo {
             }
         });
 
-        textAreaAppenderThread = new Thread(() -> {
-            while (true) {
-//                while (!Thread.currentThread().isInterrupted()) {
-//                    if (counter.get() == 0) {
-//                        break;
-//                    }
-//                }
-
+        Thread textAreaAppenderThread = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
                 synchronized (quotes) {
-                    textArea.setText("");
-                    var collection = quotes.stream().sorted(Comparator.comparing(QuoteDto::getDate)).collect(Collectors.toList());
-//                    quotes.sort(Comparator.comparing(QuoteDto::getDate));?
-                    collection.forEach(quote -> {
-                        textArea.append(quote.getDate() + ": " + quote.getClose() + "\n");
-                    });
-                    quotes.clear();
+                    try {
+                        quotes.wait();
+                        textArea.setText("");
+                        quotes.forEach(quote -> textArea.append(quote.getDate() + ": " + quote.getClose() + "\n"));
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
                 }
             }
         });
@@ -99,20 +84,18 @@ public class StockPricesDownloaderDemo {
         frame.setVisible(true);
     }
 
-    private static void startDownloaderWorkers(String symbol, List<QuoteDto> result) {
+    private static void startDownloaderWorkers(String symbol, SortedSet<QuoteDto> result) {
         var endDate = LocalDate.now();
         var startDate = endDate.minusMonths(1);
         for (var start = startDate; !start.isAfter(endDate); start = start.plusDays(1)) {
-            counter.incrementAndGet();
-            var worker = new Worker(symbol, result, start, start);
-            executor.execute(worker);
+            executor.execute(new Worker(symbol, result, start, start));
         }
     }
 
     @RequiredArgsConstructor
     private static class Worker implements Runnable {
         private final String symbol;
-        private final List<QuoteDto> result;
+        private final SortedSet<QuoteDto> result;
         private final LocalDate startDate;
         private final LocalDate endDate;
 
@@ -124,7 +107,6 @@ public class StockPricesDownloaderDemo {
                 result.addAll(quotes);
                 result.notifyAll();
             }
-            counter.decrementAndGet();
         }
     }
 

@@ -1,21 +1,10 @@
 package practicum.concurrency.problem.gui;
 
-import lombok.RequiredArgsConstructor;
-import practicum.concurrency.problem.gui.market.MoexQuoteDownloader;
-import practicum.concurrency.problem.gui.market.QuoteDto;
-
 import javax.swing.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
-public class StockPricesDownloaderDemo {
+public class StockPricesDownloaderDemo extends JFrame {
+    private static final int DEFAULT_NUM_ACTIVE_THREADS = 4;
+    private static final String DEFAULT_STOCK_SYMBOL = "MOEX";
     private static final String BUTTON_TEXT_STOP = "Stop";
     private static final String BUTTON_TEXT_START = "Start";
 
@@ -24,16 +13,9 @@ public class StockPricesDownloaderDemo {
         STARTED
     }
 
-    private static ButtonState buttonState = ButtonState.STOPPED;
-    private static final MoexQuoteDownloader quoteDownloader = new MoexQuoteDownloader();
-    private static final List<Thread> workers = new ArrayList<>();
-    private static final List<QuoteDto> quotes = new CopyOnWriteArrayList<>();
-    private static Thread textAreaAppenderThread;
-    private static final Object monitor = new Object();
-    private static final Executor executor = Executors.newFixedThreadPool(4);
-    private static final AtomicInteger counter = new AtomicInteger(0);
+    private ButtonState buttonState = ButtonState.STOPPED;
 
-    public static void main(String... args) {
+    private StockPricesDownloaderDemo()  {
         var frame = new JFrame("Stock price loader");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setSize(500, 400);
@@ -46,86 +28,37 @@ public class StockPricesDownloaderDemo {
         panel.add(button);
 
         var textField = new JTextField(16);
+        textField.setText(DEFAULT_STOCK_SYMBOL);
         panel.add(textField);
 
         var inputLabel = new JLabel("Enter stock symbol");
         panel.add(inputLabel);
 
-        var textArea = new JTextArea(10, 35);
-        textArea.setEditable(false);
-        panel.add(textArea);
-
-        var scroll = new JScrollPane(textArea);
+        var outputTextArea = new JTextArea(22, 35);
+        outputTextArea.setEditable(false);
+        var scroll = new JScrollPane(outputTextArea);
         panel.add(scroll);
         scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS);
 
-        button.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                if (buttonState == ButtonState.STOPPED) {
-                    button.setText(BUTTON_TEXT_STOP);
-                    buttonState = ButtonState.STARTED;
-                    startDownloaderWorkers(textField.getText(), quotes);
-                } else {
-                    button.setText(BUTTON_TEXT_START);
-                    buttonState = ButtonState.STOPPED;
-                    textArea.setText("");
-                    quotes.clear();
-                }
+        final QuoteAppender quoteAppender = new QuoteAppender(outputTextArea, DEFAULT_NUM_ACTIVE_THREADS);
+
+        button.addActionListener(e -> {
+            if (buttonState == ButtonState.STOPPED) {
+                button.setText(BUTTON_TEXT_STOP);
+                buttonState = ButtonState.STARTED;
+                quoteAppender.startForStock(textField.getText());
+            } else {
+                button.setText(BUTTON_TEXT_START);
+                buttonState = ButtonState.STOPPED;
+                outputTextArea.setText("");
+                quoteAppender.reset();
             }
         });
-
-        textAreaAppenderThread = new Thread(() -> {
-            while (true) {
-//                while (!Thread.currentThread().isInterrupted()) {
-//                    if (counter.get() == 0) {
-//                        break;
-//                    }
-//                }
-
-                synchronized (quotes) {
-                    textArea.setText("");
-                    var collection = quotes.stream().sorted(Comparator.comparing(QuoteDto::getDate)).collect(Collectors.toList());
-//                    quotes.sort(Comparator.comparing(QuoteDto::getDate));?
-                    collection.forEach(quote -> {
-                        textArea.append(quote.getDate() + ": " + quote.getClose() + "\n");
-                    });
-                    quotes.clear();
-                }
-            }
-        });
-        textAreaAppenderThread.start();
 
         frame.setVisible(true);
     }
 
-    private static void startDownloaderWorkers(String symbol, List<QuoteDto> result) {
-        var endDate = LocalDate.now();
-        var startDate = endDate.minusMonths(1);
-        for (var start = startDate; !start.isAfter(endDate); start = start.plusDays(1)) {
-            counter.incrementAndGet();
-            var worker = new Worker(symbol, result, start, start);
-            executor.execute(worker);
-        }
+    public static void main(String... args) {
+        SwingUtilities.invokeLater(StockPricesDownloaderDemo::new);
     }
-
-    @RequiredArgsConstructor
-    private static class Worker implements Runnable {
-        private final String symbol;
-        private final List<QuoteDto> result;
-        private final LocalDate startDate;
-        private final LocalDate endDate;
-
-        @Override
-        public void run() {
-            var quotes = quoteDownloader.download(symbol, startDate, endDate);
-            System.out.println(quotes);
-            synchronized (result) {
-                result.addAll(quotes);
-                result.notifyAll();
-            }
-            counter.decrementAndGet();
-        }
-    }
-
 }
